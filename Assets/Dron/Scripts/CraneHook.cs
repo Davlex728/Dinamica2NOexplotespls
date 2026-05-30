@@ -1,9 +1,11 @@
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody))]
 public class CraneHook : MonoBehaviour
 {
+    public const string CargoTag = "Load";
     [Header("Área del Gancho")]
     public float hookRadius = 3f;
     public Vector3 hookOffset = new Vector3(0, -1.5f, 0); // DOnde se crea la detccion en respecto al dron habria que hacer un gizmo o poner algo 
@@ -23,6 +25,12 @@ public class CraneHook : MonoBehaviour
     private Rigidbody droneRb;
     private SpringJoint currentCable;
     private LineRenderer lineRenderer; // Componente para dibujar el cable
+
+    public GameObject CurrentCargo => currentCable != null ? currentCable.gameObject : null;
+    public bool IsCarryingCargo => currentCable != null;
+
+    public event Action<GameObject> OnCargoPickedUp;
+    public event Action<GameObject> OnCargoReleased;
 
     void Start()
     {
@@ -66,12 +74,11 @@ public class CraneHook : MonoBehaviour
         foreach (Collider hit in hits)
         {
             // Solo pillar objetos con el tag que si no es una locura y enganchas paredes (:
-            if (hit.CompareTag("Load"))
+            if (hit.CompareTag(CargoTag))
             {
                 Rigidbody cargoRb = hit.GetComponent<Rigidbody>();
                 if (cargoRb != null)
                 {
-                    // Creamos el Spring Joint en la carga y lo conectamos al dron
                     currentCable = hit.gameObject.AddComponent<SpringJoint>();
                     currentCable.connectedBody = droneRb;
 
@@ -91,10 +98,10 @@ public class CraneHook : MonoBehaviour
                     currentCable.minDistance = 0f;
                     currentCable.maxDistance = cableLength;
 
-                    // activar cable
                     lineRenderer.enabled = true;
+                    OnCargoPickedUp?.Invoke(hit.gameObject);
 
-                    break; // Solo  engancha la primera 
+                    break; // Solo engancha la primera
                 }
             }
         }
@@ -102,14 +109,14 @@ public class CraneHook : MonoBehaviour
 
     private void ReleaseHook()
     {
-        // Para soltar la carga destruimos el joint y au
-        if (currentCable != null)
-        {
-            Destroy(currentCable);
+        if (currentCable == null)
+            return;
 
-            // apagar cable
-            lineRenderer.enabled = false;
-        }
+        GameObject releasedCargo = currentCable.gameObject;
+        Destroy(currentCable);
+        currentCable = null;
+        lineRenderer.enabled = false;
+        OnCargoReleased?.Invoke(releasedCargo);
     }
 
     private void Update()
