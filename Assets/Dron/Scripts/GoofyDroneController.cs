@@ -10,21 +10,25 @@ public class GoofyDroneEventsController : MonoBehaviour
     public float thrustPower = 25f;
 
     [Header("Asistencias de Vuelo")]
-    public float mainThrustPower = 15f; // Fuerza extra para el botón que activa todos los motores a la vez
-    public float autoLevelForce = 15f;  // Fuerza para que intente quedarse recto
+    public float mainThrustPower = 15f;
+    public float autoLevelForce = 15f;
 
     [Header("Particulas")]
     public ParticleSystem[] thrusterParticles = new ParticleSystem[4];
     public float maxParticleEmission = 50f;
 
-    // Variables internas para guardar si el botón está pulsado o no
-    private float fl_input, fr_input, rl_input, rr_input; //Fran fl es front left y rl es rear left  etc por si acaso como las ruedas de la f1
-    private float mainThrust_input; // Variable para el botón de empuje global
+    [Header("Rotación (Yaw)")]
+    public float yawTorque = 5f;
+
+    private float fl_input, fr_input, rl_input, rr_input;
+    private float mainThrust_input;
+    private float yaw_input;
     private Rigidbody rb;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
+        rb.centerOfMass = new Vector3(0, -0.5f, 0);
 
         foreach (var ps in thrusterParticles)
         {
@@ -36,39 +40,42 @@ public class GoofyDroneEventsController : MonoBehaviour
         }
     }
 
-    // El 'context' nos da la información de si la tecla se acaba de pulsar, mantener o soltar
     public void OnFrontLeft(InputAction.CallbackContext context) => fl_input = context.ReadValue<float>();
     public void OnFrontRight(InputAction.CallbackContext context) => fr_input = context.ReadValue<float>();
     public void OnRearLeft(InputAction.CallbackContext context) => rl_input = context.ReadValue<float>();
     public void OnRearRight(InputAction.CallbackContext context) => rr_input = context.ReadValue<float>();
 
-    // Evento para el botón de empuje global (los 4 a la vez)
     public void OnMainThrust(InputAction.CallbackContext context) => mainThrust_input = context.ReadValue<float>();
+
+    public void OnYaw(InputAction.CallbackContext context)
+    {
+        Vector2 inputVec = context.ReadValue<Vector2>();
+        yaw_input = inputVec.x;
+    }
 
     void FixedUpdate()
     {
-        // Aplicamos el empuje individual
         ApplyThrust(0, fl_input, mainThrust_input);
         ApplyThrust(1, fr_input, mainThrust_input);
         ApplyThrust(2, rl_input, mainThrust_input);
         ApplyThrust(3, rr_input, mainThrust_input);
 
-        // Aplicamos el empuje global si se está pulsando
         if (mainThrust_input > 0.05f)
         {
             for (int i = 0; i < 4; i++)
             {
-                // Empuja los 4 propulsores al mismo tiempo
                 Vector3 mainForce = transform.up * mainThrustPower * mainThrust_input;
                 rb.AddForceAtPosition(mainForce, thrusters[i].position, ForceMode.Force);
             }
         }
 
-        // Estabilizador para que no vuelquw
-        // Calcula la diferencia entre la inclinación del dron y el cielo (Vector3.up)
         Vector3 correctionTorque = Vector3.Cross(transform.up, Vector3.up);
-        // Aplica un giro (Torque) para corregir esa inclinación y que no vuelque tan fácil si quitas estoes injugable
         rb.AddTorque(correctionTorque * autoLevelForce, ForceMode.Acceleration);
+
+        if (Mathf.Abs(yaw_input) > 0.05f)
+        {
+            rb.AddRelativeTorque(Vector3.up * yaw_input * yawTorque, ForceMode.Acceleration);
+        }
     }
 
     private void ApplyThrust(int index, float individualInput, float globalInput)
@@ -77,8 +84,7 @@ public class GoofyDroneEventsController : MonoBehaviour
 
         if (individualInput > 0.05f)
         {
-            // Aplica la fuerza hacia arriba en la posición local del propulsor correspondiente
-            Vector3 force = transform.up * thrustPower * individualInput; // asi no es de o a 100 el rpopulsor hay mas "control" por parte del jugador
+            Vector3 force = transform.up * thrustPower * individualInput;
             rb.AddForceAtPosition(force, thrusters[index].position, ForceMode.Force);
         }
 
