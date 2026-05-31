@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class DeliveryManager : MonoBehaviour
 {
-    public const string CargoTag = "Load";
+   public const string CargoTag = "Load";
  
     [Header("Mision")]
     [SerializeField] private int totalDeliveries = 3;
@@ -20,6 +20,7 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private DeliveryZone[] deliveryZones;
     [SerializeField] private Transform[] deliveryPoints;
     [SerializeField] private float deliveryZoneRadius = 3f;
+    [SerializeField] private float boxMass = 0.5f;
  
     [Header("Rayos (recogida y entrega)")]
     [SerializeField] private float pickupBeamHeight = 40f;
@@ -166,7 +167,7 @@ public class DeliveryManager : MonoBehaviour
  
         if (!box.TryGetComponent(out Rigidbody rb))
             rb = box.AddComponent<Rigidbody>();
-        rb.mass       = 0.5f;
+        rb.mass = boxMass;
         rb.useGravity = true;
  
         if (!box.TryGetComponent(out BoxCollider _))
