@@ -11,6 +11,7 @@ public class DeliveryManager : MonoBehaviour
     [Header("Referencias")]
     [SerializeField] private CraneHook craneHook;
     [SerializeField] private GameObject boxTemplate;
+    [SerializeField] private Tiempo timer;
  
     [Header("Zonas de recogida — arrastra aqui los Emptys")]
     [SerializeField] private Transform[] pickupPoints;
@@ -21,9 +22,9 @@ public class DeliveryManager : MonoBehaviour
     [SerializeField] private float deliveryZoneRadius = 3f;
  
     [Header("Rayos (recogida y entrega)")]
-    [SerializeField] private float pickupBeamHeight   = 40f;
-    [SerializeField] private float pickupBeamWidth    = 0.35f;
-    [SerializeField] private Color pickupBeamColor    = new Color(1f, 0.92f, 0.2f, 0.9f);
+    [SerializeField] private float pickupBeamHeight = 40f;
+    [SerializeField] private float pickupBeamWidth  = 0.35f;
+    [SerializeField] private Color pickupBeamColor  = new Color(1f, 0.92f, 0.2f, 0.9f);
  
     [Space]
     [SerializeField] private float deliveryBeamHeight = 40f;
@@ -42,6 +43,7 @@ public class DeliveryManager : MonoBehaviour
  
     public event Action<int, int> OnDeliveryProgress;
     public event Action           OnMissionCompleted;
+    public event Action<string>   OnHUDTextChanged;
  
     private sealed class MissionRound
     {
@@ -59,34 +61,38 @@ public class DeliveryManager : MonoBehaviour
     {
         if (craneHook   == null) craneHook   = FindFirstObjectByType<CraneHook>();
         if (boxTemplate == null) boxTemplate = GameObject.FindGameObjectWithTag(CargoTag);
+        if (timer       == null) timer       = FindFirstObjectByType<Tiempo>();
     }
  
     private void Start()
     {
         if (craneHook == null)
         {
-            Debug.LogError("DeliveryManager: no se encontro CraneHook en la escena.");
-            enabled = false;
-            return;
+            Debug.LogError("DeliveryManager: no se encontro CraneHook.");
+            enabled = false; return;
         }
         if (boxTemplate == null)
         {
-            Debug.LogError("DeliveryManager: no hay plantilla de caja con tag Load.");
-            enabled = false;
-            return;
+            Debug.LogError("DeliveryManager: no hay caja con tag Load.");
+            enabled = false; return;
         }
         if (pickupPoints == null || pickupPoints.Length == 0)
         {
-            Debug.LogError("DeliveryManager: asigna al menos un Empty en Pickup Points.");
-            enabled = false;
-            return;
+            Debug.LogError("DeliveryManager: asigna los Emptys en Pickup Points.");
+            enabled = false; return;
         }
         if (deliveryPoints == null || deliveryPoints.Length == 0)
         {
-            Debug.LogError("DeliveryManager: asigna al menos un Empty en Delivery Points.");
-            enabled = false;
-            return;
+            Debug.LogError("DeliveryManager: asigna los Emptys en Delivery Points.");
+            enabled = false; return;
         }
+        if (timer == null)
+        {
+            Debug.LogError("DeliveryManager: no se encontro el componente Tiempo.");
+            enabled = false; return;
+        }
+ 
+        timer.OnTimeOut += HandleTimeOut;
  
         BuildMissionRounds();
         craneHook.OnCargoPickedUp += HandleCargoPickedUp;
@@ -101,6 +107,8 @@ public class DeliveryManager : MonoBehaviour
             craneHook.OnCargoPickedUp -= HandleCargoPickedUp;
             craneHook.OnCargoReleased -= HandleCargoReleased;
         }
+        if (timer != null)
+            timer.OnTimeOut -= HandleTimeOut;
     }
  
     // =========================================================================
@@ -120,7 +128,6 @@ public class DeliveryManager : MonoBehaviour
             Vector3 pickupPos   = pickupPoints[i].position;
             Vector3 deliveryPos = deliveryPoints[i].position;
  
-            // Raiz del punto de recogida
             var pickupRoot = new GameObject("PickupSpot_" + (i + 1));
             pickupRoot.transform.SetParent(transform, false);
             pickupRoot.transform.position = pickupPos;
@@ -128,14 +135,12 @@ public class DeliveryManager : MonoBehaviour
             round.pickupBox = CreatePickupBox(pickupPos, i + 1);
             round.pickupBox.transform.SetParent(pickupRoot.transform, true);
  
-            // Rayo amarillo (recogida)
             var pickupBeamObj = new GameObject("PickupBeam");
             pickupBeamObj.transform.SetParent(pickupRoot.transform, false);
             round.pickupBeam = pickupBeamObj.AddComponent<GuideBeam>();
             round.pickupBeam.Configure(pickupBeamHeight, pickupBeamWidth, pickupBeamColor);
             round.pickupBeam.SetTarget(pickupPos);
  
-            // Zona + rayo de entrega
             round.deliveryZone = CreateDeliveryZone(deliveryPos, i + 1);
  
             var deliveryBeamObj = new GameObject("DeliveryBeam");
@@ -198,12 +203,17 @@ public class DeliveryManager : MonoBehaviour
         isCompletingDelivery = false;
  
         MissionRound round = rounds[roundIndex];
-        ResetBox(round.pickupBox, pickupPoints[roundIndex].position);
  
+        // Si la caja lleva un SpringJoint colgando del intento anterior, lo borramos
+        if (round.pickupBox.TryGetComponent(out SpringJoint oldJoint))
+            Destroy(oldJoint);
+ 
+        ResetBox(round.pickupBox, pickupPoints[roundIndex].position);
         round.pickupBox.SetActive(true);
         round.pickupBeam.SetActive(true);
         round.deliveryBeam.SetActive(false);
  
+        timer.StartTimer();
         NotifyProgress();
     }
  
@@ -217,6 +227,25 @@ public class DeliveryManager : MonoBehaviour
         }
     }
  
+    // Se llama cuando el timer llega a 0
+    private void HandleTimeOut()
+    {
+        if (missionComplete) return;
+ 
+        Debug.Log("Tiempo agotado — reiniciando ronda " + (currentRoundIndex + 1));
+ 
+        // Si la caja está enganchada al dron, soltamos el joint antes de resetear
+        MissionRound round = rounds[currentRoundIndex];
+        if (round.pickupBox.TryGetComponent(out SpringJoint joint))
+            Destroy(joint);
+ 
+        // Reiniciamos la ronda actual desde cero
+        BeginRound(currentRoundIndex);
+ 
+        // Avisamos al HUD del reinicio
+        OnHUDTextChanged?.Invoke(GetHUDText());
+    }
+ 
     private void HandleCargoPickedUp(GameObject cargo)
     {
         if (missionComplete || !IsActiveRoundCargo(cargo)) return;
@@ -225,6 +254,8 @@ public class DeliveryManager : MonoBehaviour
         MissionRound round = rounds[currentRoundIndex];
         round.pickupBeam.SetActive(false);
         round.deliveryBeam.SetActive(true);
+ 
+        NotifyProgress();
     }
  
     private void HandleCargoReleased(GameObject cargo)
@@ -253,6 +284,8 @@ public class DeliveryManager : MonoBehaviour
         isCompletingDelivery = true;
         carryingCargo        = false;
  
+        timer.StopTimer();
+ 
         MissionRound round = rounds[currentRoundIndex];
         round.deliveryBeam.SetActive(false);
         round.pickupBox.SetActive(false);
@@ -266,7 +299,8 @@ public class DeliveryManager : MonoBehaviour
             missionComplete = true;
             cargo.SetActive(false);
             OnMissionCompleted?.Invoke();
-            Debug.Log("Mision completada! Has entregado las 3 cajas.");
+            OnHUDTextChanged?.Invoke(GetHUDText());
+            Debug.Log("Mision completada!");
             return;
         }
  
@@ -299,6 +333,4 @@ public class DeliveryManager : MonoBehaviour
         int displayRound = Mathf.Min(currentRoundIndex + 1, totalDeliveries);
         return "Entrega " + displayRound + "/" + totalDeliveries + " - " + state;
     }
- 
-    public event Action<string> OnHUDTextChanged;
 }
